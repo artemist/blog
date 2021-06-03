@@ -60,9 +60,10 @@ These fields help you figure out if the error is coming from this computer, OS i
 
 ### Process permissions
 These help you understand what kind of access a process has. You might get errors if a process has insufficient permission or runs as the wrong user
-- **_UID** tells you what user executed the process. You can get this for your user with the command `id`.
-- **_GID** tells you which group the process was using. While a user can have several groups, a process executes under one primary group ID
+- **_UID** tells you what user executed the process, as seen by journald. You can get this for your user with the command `id`.
+- **_GID** tells you which group the process was using, as seen by journald. While a user can have several groups, a process executes under one primary group ID
 - **_CAP_EFFECTIVE** provides what [capabilities](https://linux.die.net/man/7/capabilities) a process can use. Capabilities give fine-grained privileged access to processes without requiring them to be the root user. For example, binding to port 80 or 443 requires the CAP_NET_BIND_SERVICE capability. If _CAP_EFFECTIVE=0 then you know you've missed that capability.
+- **_SELINUX_CONTEXT** is an additional set of permissions when using the [SELinux LSM](https://www.redhat.com/en/topics/linux/what-is-selinux) (Linux Security Module). I don't use SELinux on this sytem so it just shows up as "kernel", meaning SELinux will not limit permissions. Fedora, CentOS, and RHEL use SELinux by default.
 
 ### systemd context
 If you're using journald you're almost certainly using systemd to start all your processes. Systemd organizes processes into "units", such as OS services and user sessions, and "slices", a set of similar units.
@@ -74,6 +75,10 @@ These are represented to the rest of the OS as a hierarchical set of "cgroups" w
 - **_SYSTEMD_USER_SLICE** and **_SYSTEMD_USER_UNIT** are similar to the same fields without USER, but assigned by the user systemd
 
 ### Process context
+- **_PID** is the process ID (a numeric ID from 1 to 4194304) as seen by journald. PIDs are not unique over a system boot but should not be reused at the same time.
+- **_EXE** is the location of the executable. This is the result of canonicalizing the symlinks at executable start (i.e. if originally a → b → c, you execute a, then a → b → d, then `_EXE` will still contain a). On your system this will probably end up being something in `/usr/bin` but I use [NixOS](https://nixos.org/) which uses extremely long executable path names.
+- **_CMDLINE** is the full command with arguments as you might see in `char **argv`. Note that a program can change this. The most high-profile example I've seen of this is nginx, where you will see logs from `nginx: worker process`.
+- **_COMM** is the command name. This will normally be the final part of the path in `_EXE` but can be different, especially when running programs like [busybox](https://www.busybox.net/) where multiple programs are in file. This is also the pthread name of the sending thread. For example when logging from Firefox this might be `Web Content`.
 
 ### Time
 Time, as it turns out, is extremely complicated. You'll get 3 separate time fields. Two of them are the "wall clock" time in unix time (nominally microseconds since midnight at the beginning of 1 January 1970 UTC, though leap seconds make this a bit more complicated). Unfortunately, wall clock time can jump forwards or backwards if your computer's clock is too slow or fast, respectively. Therefore, systemd also includes the "monotonic time", a number of seconds since some point in the past. This is guaranteed to always move forward so this is what you'll want to discern ordering.
@@ -82,7 +87,7 @@ Unfortunately wall clock time is also more complicated than you might expect. Li
 - **CLOCK_MONOTONIC_RAW** counts the amount of time that Linux has spent not asleep since last boot.
 - **CLOCK_MONOTONIC** is similar but will also include incremental adjustments from your time synchronization daemon noticing a fast or slow clock and reporting it to the kernel with [adjtime](https://linux.die.net/man/3/adjtime). The adjustments happen over a long period by speeding up or slowing the clock.
 - **CLOCK_BOOTTIME** is similar to CLOCK_MONOTONIC but also counts time where they system is asleep.
-- **CLOCK_MONOTONIC_COARSE** is similar to CLOCK_MONOTONIC but requires slightly less work in the Kernel and is less accurate.
+- **CLOCK_MONOTONIC_COARSE** is similar to CLOCK_MONOTONIC but requires slightly less work in the Kernel and is less accurate. This isn't particularly useful for our use case
 
 Now for the actual fields:
 - **_SOURCE_REALTIME_TIMESTAMP** is the UTC timestamp collected as soon as journald receives the message
@@ -98,6 +103,15 @@ Finally there's the untrusted message sent by the process.
 - Some programs also send where the error comes from with **CODE_FILE**, **CODE_LINE**, and **CODE_FUNC**
 - **PRIORITY** is how severe the issue is with 0 being the most important and 7 being the least. In this example, 4 means "warning"
 - **SYSLOG_IDENTIFIER** is the program identifier and is what you would get as the program source if you were using syslogd (as you would before systemd)
+
+## A Note on Namespaces
+Linux has the concept of a "namespace" mostly seen with containers which allows different processes to see the system differently. A few types make things interesting when logging to a journald outside the namespace (e.g. if you pass through the host journald socket to a container)
+- **PID** namespaces allow different processes to see a different list of processes. For example, I'm currently running a container to run games on my laptop. If I list processes in the container I only see 34 while there are 472 running on my system overall. Additionally, within a PID namespace PIDs will be remapped. My games container is running systemd at PID 1 but that same process appears to the rest of my system as PID 2454372. The Linux kernel remaps PIDs to make sense in the receiver's PID namespace when sending the sender's credentials, so journald will record the PID as seen from the host if you pass it through to a container.
+- **User** namespaces remap user and group IDs. This can be useful so that Linux doesn't assume everything running as root in your container has full root permissions on the the host with respect to e.g. loading kernel modules. When you make a user namespace you specify a UID map for reading and setting UIDs. For example, I use UID 1000000 instead of UID 0 in my games container. Journald will see the PID and GID as seen from the host namespace
+- **Mount**
+- **UTS** namespaces allow programs to see a different hostname. Journald deals with these by not caring. Journald sets the `_HOSTNAME` field by asking for the hostname from the OS once then caching it. Messages from containers will show up in the log as using the hostname where journald receives it.
+- **Time** 
+
 
 ## Transports
 There's still one field  I haven't described: **_TRANSPORT**. This requires a little more context.
