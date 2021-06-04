@@ -123,8 +123,39 @@ Journald can get messages from one of 6 separate sources: **journal** (using the
 ### Native (journal)
 
 ### Service output (stdout)
+Unfortunately, it would be a lot of work and cause security issues for systemd systemd to read every process's output, reformat it for the native protocol, then send it to journald. Therefore, the journald authors added another method: stdout.
+When you execute a service with systemd, the process's stdout and stderr will point to a socket connected to journald. You can also use the `systemd-cat` program to do this.
+When you run `systemd-cat echo` it performs these system calls (i.e. requests to the kernel). I've extracted the relevant part I recorded using [strace](https://jvns.ca/blog/2015/04/14/strace-zine/)
+```c
+socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0) = 3
+connect(3, {sa_family=AF_UNIX, sun_path="/run/systemd/journal/stdout"}, 30) = 0
+shutdown(3, SHUT_RD)                    = 0
+getsockopt(3, SOL_SOCKET, SO_SNDBUF, [212992], [4]) = 0
+setsockopt(3, SOL_SOCKET, SO_SNDBUF, [8388608], 4) = 0
+getsockopt(3, SOL_SOCKET, SO_SNDBUF, [425984], [4]) = 0
+setsockopt(3, SOL_SOCKET, SO_SNDBUFFORCE, [8388608], 4) = -1 EPERM (Operation not permitted)
+write(3, "\n\n6\n1\n0\n0\n0\n", 12)     = 12
+fcntl(2, F_DUPFD_CLOEXEC, 3)            = 4
+fcntl(0, F_GETFD)                       = 0
+dup2(3, 1)                              = 1
+dup2(3, 2)                              = 2
+close(3)                                = 0
+execve("/run/current-system/sw/bin/echo", ["echo"], 0x7fff9dc55070 /* 75 vars */) = -1 ENOENT (No such file or directory)
+```
+This does a few things:
+- Connect to `/run/systemd/journal/stdout`
+- Make the connection to the journal socket write-only, since there's no need to read responses from journald and it could confuse programs
+- Attempt to expand the send buffer to 8 MiB in case the program sends a lot of output
+- Send some setup information to journald
+- Create a copy of the original stderr in order to print error messages if it has problems calling your program
+- Check which descriptor flags are set for standard input. In this case there's none
+- Copy the socket to journald to file descriptors 1 and 2, stdout and stderr respectively
+- Close the original file descriptor so that the other program is free to use number 3
+- Call the program you specified
+
 
 ### Legacy (syslog)
+Not every program has been designed to work with journald. Using syslog lets you add some some options, like severity, while retaining support with non-systemd linux distributions and BSD.
 
 ## Overview
 Anything related to Linux quickly turns into a huge rabbit hole. I could certainly write articles on many of the 
