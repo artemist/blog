@@ -125,6 +125,8 @@ Journald can get messages from one of 6 separate sources: **journal** (using the
 ### Service output (stdout)
 Unfortunately, it would be a lot of work and cause security issues for systemd systemd to read every process's output, reformat it for the native protocol, then send it to journald. Therefore, the journald authors added another method: stdout.
 When you execute a service with systemd, the process's stdout and stderr will point to a socket connected to journald. You can also use the `systemd-cat` program to do this.
+
+#### Into the Syscalls
 When you run `systemd-cat echo` it performs these system calls (i.e. requests to the kernel). I've extracted the relevant part I recorded using [strace](https://jvns.ca/blog/2015/04/14/strace-zine/)
 ```c
 socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0) = 3
@@ -145,13 +147,34 @@ execve("/run/current-system/sw/bin/echo", ["echo"], 0x7fff9dc55070 /* 75 vars */
 This does a few things:
 - Connect to `/run/systemd/journal/stdout`
 - Make the connection to the journal socket write-only, since there's no need to read responses from journald and it could confuse programs
-- Attempt to expand the send buffer to 8 MiB in case the program sends a lot of output
+- Attempt to expand the send buffer to 8 MiB in case the program sends a lot of output. The kernel only lets it go up to 416KiB.
 - Send some setup information to journald
 - Create a copy of the original stderr in order to print error messages if it has problems calling your program
 - Check which descriptor flags are set for standard input. In this case there's none
 - Copy the socket to journald to file descriptors 1 and 2, stdout and stderr respectively
 - Close the original file descriptor so that the other program is free to use number 3
 - Call the program you specified
+
+The main part is copying the socket file descriptor to stdout and stderr. This means that any time the program writes something to its output
+it will actually send a message to journald
+
+#### But What is That Setup Information Anyway?
+There are a few options you can configure when setting up a stdout journald stream. The journald authors decided the best way to do this was
+to send some newline separated options.  Once the last option is sent (7 newlines) then journald assumes everything is a log message.
+They also designed their [parsing function](https://github.com/systemd/systemd-stable/blob/37c4cfde0ce613f0f00544d3f4e2e72bf93d9c76/src/journal/journald-stream.c#L359) to support 
+In order the option sent are:
+- Stream Identifier (empty in this case) is a a string that identifies what service the message comes from. It will show up as SYSLOG_IDENTIFIERin in the journald output.
+- Unit ID (empty in this case)
+- Default Priority (6 in this case) is the priority to use when it is not otherwise specified. In this case 6 means "Informational" or that it doesn't require any action.
+- Level Prefix (1 in this case) is whether to parse syslog priority prefixes. For example, if a line starts with `<3>` then journald will log it as having priority 3, overriding the default.
+- Forward to Syslog (0 in this case) is whether to send a copy of the message to syslog in case you have another logging daemon to pick it up
+- Forward to kmsg (0 in this case) is whether to send a copy to the kernel message buffer. You can read this through dmesg
+- Forward to Console (0 in this case) is whethher to send a copy of the message to your console, if you're in a Linux TTY. I haven't gotten this to work
+
+#### Trying it out
+
+
+#### Overview
 
 
 ### Legacy (syslog)
