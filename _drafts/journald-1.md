@@ -1,7 +1,7 @@
 ---
 layout: post
 title: Jumping into journald
-date: 2021-06-02
+date: 2021-06-06
 ---
 
 On many Linux systems, systemd-journald runs as a daemon at boot and collects your logs. You can access
@@ -118,9 +118,20 @@ Linux has the concept of a "namespace" mostly seen with containers which allows 
 
 ## Transports
 There's still one field  I haven't described: **_TRANSPORT**. This requires a little more context.
-Journald can get messages from one of 6 separate sources: **journal** (using the native journald protocol), **stdout** (a process's standard output or error redirected to systemd), **syslog** (the legacy Linux logging system), **kernel** (kernel messages you can get through the `dmesg` command), **audit** (logs the kernel generates about programs' activities), and **driver** (error messages from within journald). Each has their own peculiarities from both the journald side and the client side but I'll mostly be talking about journald, stdout, and syslog.
+Journald can get messages from one of 6 separate sources: **journal** (using the native journald protocol), **stdout** (a process's standard output or error redirected to systemd), **syslog** (the pre-systemd Unix logging system used if you need to be compatible with BSD or non-systemd distributions), **kernel** (kernel messages you can get through the `dmesg` command), **audit** (logs the kernel generates about programs' activities), and **driver** (error messages from within journald). Each has their own peculiarities from both the journald side and the client side but I'll mostly be talking about journal and stdout.
 
 ### Native (journal)
+If you want to send arbitrary fields you'll want to use the native transport. It's conceptually the simplest (connect to journald's socket and send messages) but has some strange idiosynchrasies.
+
+In order to send a message you must connect to journald's unix datagram socket at `/run/systemd/journal/socket`. This is a Unix socket, meaning it's represented by a location on the filesystem instead of a port.
+Limiting the socket to one system gives you a few advantages: You can use standard filesystem permissions, you're less likely to have port collisions, the kernel can provide context about the program sending the message, and programs can send 
+auxiliary data like references to files through the socket.
+This is also a datagram socket, meaning it's message-based. Like UDP, you send individual messages and are responsible for splitting up your data into chunks. However, unlike UDP, unix datagram sockets are reliable, in-order, and have large maximum message sizes.
+
+When you want to add an entry to the log, you can connect to the socket then send a message formatted as newline separated `FIELD=value`. The `MESSAGE` field is required and your your entry will be ignored if you forget it.
+This protocol is simple enough that you can send log messages from your terminal using netcat, a tool for sending and receiving data from sockets: `echo -e "MESSAGE=owo\nOWO=uwu" | nc -Uu /run/systemd/journal/socket` will create a new entry with `MESSAGE=owo` and `OWO=uwu`.
+You can view this output with `journalctl -xeo export`. (-e on echo allows us to create a new line with `\n` and -Uu on netcat tells it that we're using a unix datagram socket). Note that netcat won't quit but the message will still send. nc is also not suitable for messages over 16384 bytes.
+
 
 ### Service output (stdout)
 Unfortunately, it would be a lot of work and cause security issues for systemd systemd to read every process's output, reformat it for the native protocol, then send it to journald. Therefore, the journald authors added another method: stdout.
@@ -161,10 +172,10 @@ it will actually send a message to journald
 #### But What is That Setup Information Anyway?
 There are a few options you can configure when setting up a stdout journald stream. The journald authors decided the best way to do this was
 to send some newline separated options.  Once the last option is sent (7 newlines) then journald assumes everything is a log message.
-They also designed their [parsing function](https://github.com/systemd/systemd-stable/blob/37c4cfde0ce613f0f00544d3f4e2e72bf93d9c76/src/journal/journald-stream.c#L359) to support 
+They also designed their [parsing function](https://github.com/systemd/systemd-stable/blob/37c4cfde0ce613f0f00544d3f4e2e72bf93d9c76/src/journal/journald-stream.c#L359) to support sending the header as multiple messages.
 In order the option sent are:
 - Stream Identifier (empty in this case) is a a string that identifies what service the message comes from. It will show up as SYSLOG_IDENTIFIERin in the journald output.
-- Unit ID (empty in this case)
+- Unit ID (empty in this case) overrides which systemd unit the message is from. It's ignored if you aren't root when you send this.
 - Default Priority (6 in this case) is the priority to use when it is not otherwise specified. In this case 6 means "Informational" or that it doesn't require any action.
 - Level Prefix (1 in this case) is whether to parse syslog priority prefixes. For example, if a line starts with `<3>` then journald will log it as having priority 3, overriding the default.
 - Forward to Syslog (0 in this case) is whether to send a copy of the message to syslog in case you have another logging daemon to pick it up
@@ -172,13 +183,14 @@ In order the option sent are:
 - Forward to Console (0 in this case) is whethher to send a copy of the message to your console, if you're in a Linux TTY. I haven't gotten this to work
 
 #### Trying it out
-
+You can also try out this submission method using netcat.
+A basic example:
+`echo -ne "\n\n6\n1\n0\n0\n0\n<4> hewwo\n" | nc -U /run/systemd/journal/stdout`
+This opens a stream with no stream identifier or unit ID, a default priority of 6 (info), parsing level prefixes enabled, and no forwarding enabled. Then, we send the message "hewwo" with a prefix setting the priority to 4. Note that we use `-U` but not `-u` on netcat since this is a Unix stream socket (analagous to TCP) and not a Unix datagram socket (analogus to UDP).
+If you run this you'll get a message in your logs! You can quickly view it with `journalctl -xe`. Note that you won't get the normal extra fields as netcat exits too quickly for journald to grab the data.
 
 #### Overview
 
-
-### Legacy (syslog)
-Not every program has been designed to work with journald. Using syslog lets you add some some options, like severity, while retaining support with non-systemd linux distributions and BSD.
 
 ## Overview
 Anything related to Linux quickly turns into a huge rabbit hole. I could certainly write articles on many of the 
