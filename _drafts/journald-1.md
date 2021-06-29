@@ -124,7 +124,7 @@ Journald can get messages from one of 6 separate sources: **journal** (using the
 ### Native (journal)
 If you want to send arbitrary fields you'll want to use the native transport. It's conceptually the simplest (connect to journald's socket and send messages) but has some strange idiosynchrasies.
 
-In order to send a message you must connect to journald's unix datagram socket at `/run/systemd/journal/socket`. This is a Unix socket, meaning it's represented by a location on the filesystem instead of a port.
+In order to send a message you must connect to journald's Unix datagram socket at `/run/systemd/journal/socket`. This is a Unix socket, meaning it's represented by a location on the filesystem instead of a port.
 Limiting the socket to one system gives you a few advantages: You can use standard filesystem permissions, you're less likely to have port collisions, the kernel can provide context about the program sending the message, and programs can send 
 auxiliary data like references to files through the socket.
 This is also a datagram socket, meaning it's message-based. Like UDP, you send individual messages and are responsible for splitting up your data into chunks. However, unlike UDP, unix datagram sockets are reliable, in-order, and have large maximum message sizes.
@@ -158,7 +158,7 @@ More clearly, this program will:
 
 The key part of this is sending permission to access the file to journald. Linux lets you do this by sending a special control message with "ancillary data".
 This specifically uses the [SCM_RIGHTS](https://blog.cloudflare.com/know-your-scm_rights/) type where you give the kernel a file descriptor (ID for an open file in the current process)
-and tell it to make a copy and give it to the process that receives the message. The receivng process can then ask the kernel for this ancillary data and in it will be a new file descriptor
+and tell it to make a copy and give it to the process that receives the message. The receiving process can then ask the kernel for this ancillary data and in it will be a new file descriptor
 (likely a different number than what was sent) pointing to the same file. On this case, journald will read the file then parse it as if it were sent directly, using the same format
 
 This protocol is simple enough that you can send log messages from your terminal using netcat, a tool for sending and receiving data from sockets: `echo -e "MESSAGE=owo\nOWO=uwu" | nc -Uu /run/systemd/journal/socket` will create a new entry with `MESSAGE=owo` and `OWO=uwu`.
@@ -207,19 +207,19 @@ There are a few options you can configure when setting up a stdout journald stre
 to send some newline separated options.  Once the last option is sent (7 newlines) then journald assumes everything is a log message.
 They also designed their [parsing function](https://github.com/systemd/systemd-stable/blob/37c4cfde0ce613f0f00544d3f4e2e72bf93d9c76/src/journal/journald-stream.c#L359) to support sending the header as multiple messages.
 In order the option sent are:
-- Stream Identifier (empty in this case) is a a string that identifies what service the message comes from. It will show up as SYSLOG_IDENTIFIERin in the journald output.
+- Stream Identifier (empty in this case) is a string that identifies what service the message comes from. It will show up as SYSLOG_IDENTIFIER in the journald output.
 - Unit ID (empty in this case) overrides which systemd unit the message is from. It's ignored if you aren't root when you send this.
 - Default Priority (6 in this case) is the priority to use when it is not otherwise specified. In this case 6 means "Informational" or that it doesn't require any action.
 - Level Prefix (1 in this case) is whether to parse syslog priority prefixes. For example, if a line starts with `<3>` then journald will log it as having priority 3, overriding the default.
 - Forward to Syslog (0 in this case) is whether to send a copy of the message to syslog in case you have another logging daemon to pick it up
 - Forward to kmsg (0 in this case) is whether to send a copy to the kernel message buffer. You can read this through dmesg
-- Forward to Console (0 in this case) is whethher to send a copy of the message to your console, if you're in a Linux TTY. I haven't gotten this to work
+- Forward to Console (0 in this case) is whether to send a copy of the message to your console, if you're in a Linux TTY. I haven't gotten this to work
 
 #### Trying it out
 You can also try out this submission method using netcat.
 A basic example:
 `echo -ne "\n\n6\n1\n0\n0\n0\n<4> hewwo\n" | nc -U /run/systemd/journal/stdout`
-This opens a stream with no stream identifier or unit ID, a default priority of 6 (info), parsing level prefixes enabled, and no forwarding enabled. Then, we send the message "hewwo" with a prefix setting the priority to 4. Note that we use `-U` but not `-u` on netcat since this is a Unix stream socket (analagous to TCP) and not a Unix datagram socket (analogus to UDP).
+This opens a stream with no stream identifier or unit ID, a default priority of 6 (info), parsing level prefixes enabled, and no forwarding enabled. Then, we send the message "hewwo" with a prefix setting the priority to 4. Note that we use `-U` but not `-u` on netcat since this is a Unix stream socket (analogous to TCP) and not a Unix datagram socket (analogous to UDP).
 If you run this you'll get a message in your logs! You can quickly view it with `journalctl -xe`. Note that you won't get the normal extra fields as netcat exits too quickly for journald to grab the data.
 
 #### Overview
