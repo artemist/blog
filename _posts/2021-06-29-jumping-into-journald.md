@@ -1,7 +1,7 @@
 ---
 layout: post
 title: Jumping into journald
-date: 2021-06-06
+date: 2021-06-29
 ---
 
 On many Linux systems, systemd-journald runs as a daemon at boot and collects your logs. You can access
@@ -222,9 +222,6 @@ A basic example:
 This opens a stream with no stream identifier or unit ID, a default priority of 6 (info), parsing level prefixes enabled, and no forwarding enabled. Then, we send the message "hewwo" with a prefix setting the priority to 4. Note that we use `-U` but not `-u` on netcat since this is a Unix stream socket (analogous to TCP) and not a Unix datagram socket (analogous to UDP).
 If you run this you'll get a message in your logs! You can quickly view it with `journalctl -xe`. Note that you won't get the normal extra fields as netcat exits too quickly for journald to grab the data.
 
-#### Overview
-
-
-## Overview
-Anything related to Linux quickly turns into a huge rabbit hole. I could certainly write articles on many of the 
+## Linux, ..., why?
+Anything related to Linux quickly turns into a huge rabbit hole. I could certainly write pages and pages about small things I've barely mentioned here, but I think this is a good place to stop.
 This is mostly from my own experimentation. If you have more information and noticed an error, please contact me. I'd be happy to correct anything.
