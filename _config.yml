@@ -4,7 +4,6 @@ description: >-
   Artemis Tosini's experiments
 baseurl: "/blog" # the subpath of your site, e.g. /blog
 url: "https://artem.ist" # the base hostname & protocol for your site, e.g. http://example.com
-twitter_username: artemist0
 github_username:  artemist
 
 theme: minima
